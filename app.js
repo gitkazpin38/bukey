@@ -18,9 +18,10 @@ const params = new URLSearchParams(location.search);
 const clubId = (params.get("club") || "").toLowerCase().trim();
 const codeFromUrl = (params.get("code") || "").trim();
 
-const DEFAULT_STATE = { key: "guard", holder: "", holderUid: "", holderGuest: false, room: "closed", since: 0, returnBy: "", note: "" };
-const ACT_LABEL = { borrow: "借りた", open: "開けた", lock: "閉めた", hold: "持っている", return: "返した", hand: "渡した", fix: "訂正", undo: "取消" };
-const ACT_CLASS = { borrow: "a-borrow", open: "a-open", lock: "a-lock", hold: "a-hold", return: "a-return", hand: "a-hand", fix: "a-fix", undo: "a-fix" };
+// guests: 「部員以外」として記録・譲渡した人の名前。鍵を守衛さんに返すと空になる（選択肢から消える）
+const DEFAULT_STATE = { key: "guard", holder: "", holderUid: "", holderGuest: false, guests: [], room: "closed", since: 0, returnBy: "", note: "" };
+const ACT_LABEL = { borrow: "借りた", open: "開けた", lock: "閉めた", hold: "持っている", return: "返した", hand: "渡した", fix: "訂正", undo: "取消", redo: "戻した" };
+const ACT_CLASS = { borrow: "a-borrow", open: "a-open", lock: "a-lock", hold: "a-hold", return: "a-return", hand: "a-hand", fix: "a-fix", undo: "a-fix", redo: "a-fix" };
 
 let user = null, me = null, club = null, state = { ...DEFAULT_STATE }, logs = [], members = [];
 let busy = false, ready = false, unsubs = [];
@@ -62,11 +63,15 @@ function show(view) {
   ["signin", "home", "join", "missing", "board"].forEach(v => { $("v-" + v).hidden = v !== view; });
 }
 function setConn(t) { $("conn").textContent = t; }
-function setMsg(t, kind, undoId) {
+function setMsg(t, kind, undoId, redoId) {
   const m = $("msg"); m.textContent = t || ""; m.className = "msg" + (kind ? " " + kind : "");
   if (undoId) {
     const b = document.createElement("button"); b.type = "button"; b.className = "undo-btn"; b.textContent = "取り消す";
     b.onclick = () => undo(undoId); m.append(" ", b);
+  }
+  if (redoId) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "undo-btn redo-btn"; b.textContent = "元に戻す";
+    b.onclick = () => redo(redoId); m.append(" ", b);
   }
 }
 function errText(e) {
@@ -289,7 +294,7 @@ function startBoard() {
   unsubs.push(onSnapshot(stateRef(), s => {
     state = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
     if (!s.metadata.fromCache) { clearTimeout(timer); setConn("みんなの画面とリアルタイムで同期中"); }
-    ready = true; render();
+    ready = true; fillActor(); render();
   }, e => { clearTimeout(timer); setConn("同期できません: " + errText(e)); }));
   unsubs.push(onSnapshot(query(logCol(), orderBy("ms", "desc"), limit(40)), qs => {
     logs = qs.docs.map(d => ({ ...d.data(), id: d.id })); renderLog();
@@ -319,7 +324,7 @@ function render() {
   if (s.since) {
     const t = document.createElement("span"); t.className = "t"; t.textContent = fmtWhen(s.since);
     const who = s.actor || s.by;
-    sl.append("最終更新 ", t, "（" + ago(s.since) + (who ? "・" + who + "さん" : "") + (s.actor && s.by && s.actor !== s.by ? "、記録: " + s.by + "さん" : "") + "）");
+    sl.append("最終更新 ", t, "（" + ago(s.since) + (who ? "・" + who + "さん" + (s.actorGuest ? "（部員以外）" : "") : "") + (s.actor && s.by && (s.actor !== s.by || s.actorGuest) ? "、記録: " + s.by + "さん" : "") + "）");
     if (s.key === "holding" && s.returnBy) {
       const r = document.createElement("span"); r.className = "t"; r.textContent = s.returnBy;
       sl.append(" ・ 返却予定 ", r);
@@ -367,7 +372,7 @@ function renderButtons() {
     box.append(btn("部室を開けた", "解錠して中に入る", "go", () => act("open")));
     box.append(btn("守衛さんに返した", "鍵を返却したら押す", "primary", () => act("return")));
     const a = currentActor();
-    if (s.key === "borrowed") box.append(btn(a.self ? "自分で持っている" : a.name + "さんが持っている", "返却時刻を決めて記録", "", () => showPanel("hold")));
+    if (s.key === "borrowed") box.append(btn(a.self ? "自分で持っている" : (a.name ? a.name + "さん" : "部員以外の人") + "が持っている", "返却時刻を決めて記録", "", () => showPanel("hold")));
     box.append(btn("鍵を別の人に渡した", "鍵の持ち主を変える", "", () => showPanel("hand")));
   } else {
     box.append(btn("部室を閉めた", "施錠したら押す。返却・保持はこのあと記録", "primary", () => act("lock")));
@@ -377,8 +382,12 @@ function renderButtons() {
 
 function renderLog() {
   const ul = $("log"); ul.innerHTML = "";
-  const latest = logs.find(l => l.prev && !l.undone && l.action !== "undo");
-  const undoableId = (latest && logs[0] === latest && sameState(state, latest.next)) ? latest.id : null;
+  // 取り消せるのは、取り消し・元に戻す 以外で一番新しい記録だけ。押した本人（byUid）だけ
+  const latest = logs.find(l => l.action !== "undo" && l.action !== "redo");
+  const undoableId = (latest && latest.prev && !latest.undone && user && latest.byUid === user.uid && sameState(state, latest.next)) ? latest.id : null;
+  // 元に戻せるのは、一番新しい記録が自分の「取り消し」で、そのあと状態が変わっていないときだけ
+  const top = logs[0];
+  const redoableId = (top && top.action === "undo" && top.target && top.next && !top.redone && user && top.byUid === user.uid && sameState(state, top.next)) ? top.id : null;
   if (!logs.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "まだ記録がありません。"; ul.append(li); return; }
   logs.forEach(d => {
     const li = document.createElement("li");
@@ -393,39 +402,60 @@ function renderLog() {
       const b = document.createElement("button"); b.type = "button"; b.className = "undo-btn"; b.textContent = "取り消す";
       b.disabled = busy; b.onclick = () => undo(d.id); body.append(" ", b);
     }
+    if (d.id === redoableId) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "undo-btn redo-btn"; b.textContent = "元に戻す";
+      b.disabled = busy; b.onclick = () => redo(d.id); body.append(" ", b);
+    }
     li.append(w, body); ul.append(li);
   });
 }
 
 // ---------------- 誰として記録するか ----------------
+// 選択肢の値: 部員は uid、記録済みの部員以外は "guest:名前"、新しい部員以外は NEW_GUEST
+const NEW_GUEST = "__new_guest__";
+// 選択肢に出す部員以外の名前（記録中の guests と、いま鍵を持っている部員以外）
+const guestNames = () => [...new Set([...(state.guests || []),
+  ...(state.key !== "guard" && state.holderGuest && state.holder ? [state.holder] : [])])];
 function currentActor() {
-  const uid = $("actorSel").value;
-  const m = members.find(x => x.uid === uid);
-  if (!m || !user || uid === user.uid) return { name: me ? me.name : "", uid: user ? user.uid : "", self: true };
-  return { name: m.name, uid: m.uid, self: false };
+  const v = $("actorSel").value;
+  const self = { name: me ? me.name : "", uid: user ? user.uid : "", self: true, guest: false };
+  if (v === NEW_GUEST) return { name: san($("actorGuest").value), uid: "", self: false, guest: true };
+  if (v && v.startsWith("guest:")) {
+    const name = v.slice(6);
+    return guestNames().includes(name) ? { name, uid: "", self: false, guest: true } : self;
+  }
+  const m = members.find(x => x.uid === v);
+  if (!m || !user || v === user.uid) return self;
+  return { name: m.name, uid: m.uid, self: false, guest: false };
 }
 function fillActor() {
   const sel = $("actorSel"); if (!user) return;
   const cur = sel.value || user.uid;
   sel.innerHTML = "";
   const list = members.length ? members : (me ? [me] : []);
-  // 自分を先頭に
-  [...list].sort((a, b) => (b.uid === user.uid) - (a.uid === user.uid)).forEach(m => {
-    const o = document.createElement("option"); o.value = m.uid;
-    o.textContent = m.uid === user.uid ? m.name + "（自分）" : m.name;
-    sel.append(o);
-  });
-  sel.value = list.some(m => m.uid === cur) ? cur : user.uid;
+  const add = (value, text) => { const o = document.createElement("option"); o.value = value; o.textContent = text; sel.append(o); };
+  // 自分を先頭に、部員、記録中の部員以外、新しく部員以外を足す
+  [...list].sort((a, b) => (b.uid === user.uid) - (a.uid === user.uid))
+    .forEach(m => add(m.uid, m.uid === user.uid ? m.name + "（自分）" : m.name));
+  guestNames().forEach(g => add("guest:" + g, g + "（部員以外）"));
+  add(NEW_GUEST, "＋ 部員以外の人…");
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : user.uid;
   syncActor();
 }
 function syncActor() {
-  const a = currentActor();
+  const a = currentActor(), isNew = $("actorSel").value === NEW_GUEST;
+  $("actorGuest").hidden = !isNew;
   $("actorRow").classList.toggle("proxy", !a.self);
+  $("actorRow").classList.toggle("guest", !!a.guest);
   $("actorNote").hidden = a.self;
-  $("actorNote").textContent = a.self ? "" : a.name + "さんとして記録します。記録者（" + (me ? me.name : "") + "さん）も履歴に残ります。記録すると自分に戻ります。";
+  const label = a.name ? a.name + "さん" + (a.guest ? "（部員以外）" : "") : "部員以外の人";
+  $("actorNote").textContent = a.self ? "" : label + "として記録します。記録者（" + (me ? me.name : "") + "さん）も履歴に残ります。"
+    + (a.guest ? "部員以外の人は、鍵を守衛さんに返すと選択肢から消えます。" : "") + "記録すると自分に戻ります。";
   if (ready) renderButtons();
 }
-$("actorSel").onchange = syncActor;
+function resetActor() { $("actorSel").value = user.uid; $("actorGuest").value = ""; syncActor(); }
+$("actorSel").onchange = () => { syncActor(); if ($("actorSel").value === NEW_GUEST) $("actorGuest").focus(); };
+$("actorGuest").oninput = syncActor;
 
 function showPanel(which) {
   $("holdPanel").hidden = which !== "hold";
@@ -467,29 +497,30 @@ $("fixGo").onclick = () => act("fix");
 // ---------------- state transitions ----------------
 // who = { name, uid, self }：誰として記録するか。myName は押した本人（記録者）
 function plan(kind, cur, myName, who) {
-  who = who || { name: myName, uid: user.uid, self: true };
+  who = who || { name: myName, uid: user.uid, self: true, guest: false };
   let next = { ...cur }, text = "";
   const closeTime = (club && club.closeTime) || "20:00";
   const by = who.self ? "" : "（記録: " + myName + "さん）";
+  const wn = who.name + "さん" + (who.guest ? "（部員以外）" : "");
   switch (kind) {
     case "borrow":
       if (cur.key !== "guard") throw new Error("鍵はすでに" + holderText(cur) + "が持っています。画面を確認してください。");
-      next = { key: "borrowed", holder: who.name, holderUid: who.uid, holderGuest: false, room: "closed", returnBy: "", note: "" };
-      text = who.name + "さんが守衛さんから鍵を借りた" + by; break;
+      next = { key: "borrowed", holder: who.name, holderUid: who.uid, holderGuest: !!who.guest, room: "closed", returnBy: "", note: "" };
+      text = wn + "が守衛さんから鍵を借りた" + by; break;
     case "open":
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。先に「鍵を借りた」を記録してください。");
       if (cur.room === "open") throw new Error("部室はすでに開いています。");
       next = { ...cur, key: "borrowed", room: "open", returnBy: "", note: "" };
-      text = who.name + "さんが部室を開けた（鍵: " + holderText(cur) + "）" + by; break;
+      text = wn + "が部室を開けた（鍵: " + holderText(cur) + "）" + by; break;
     case "lock":
       if (cur.room !== "open") throw new Error("部室はすでに閉まっています。");
       next = { ...cur, room: "closed" };
-      text = who.name + "さんが部室を閉めた（鍵: " + holderText(cur) + "）" + by; break;
+      text = wn + "が部室を閉めた（鍵: " + holderText(cur) + "）" + by; break;
     case "return":
       if (cur.key === "guard") throw new Error("鍵はすでに守衛室にあります。");
       if (cur.room === "open") throw new Error("部室が開いたままです。先に施錠してください。");
       next = { ...DEFAULT_STATE };
-      text = who.name + "さんが守衛さんに鍵を返した" + by; break;
+      text = wn + "が守衛さんに鍵を返した" + by; break;
     case "hold": {
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。");
       if (cur.room === "open") throw new Error("部室が開いたままです。先に施錠してください。");
@@ -499,8 +530,8 @@ function plan(kind, cur, myName, who) {
       if (close !== null && minutesOf(until) > close) throw new Error("最終返却時刻（" + closeTime + "）より後にはできません。");
       if (!$("holdPledge").checked) throw new Error("確認のチェックを入れてください。");
       const note = san($("holdNote").value, 60);
-      next = { ...cur, key: "holding", holder: who.name, holderUid: who.uid, holderGuest: false, room: "closed", returnBy: until, note };
-      text = who.name + "さんが鍵を持っている（" + until + "までに返却予定）" + (note ? "：「" + note + "」" : "") + by; break;
+      next = { ...cur, key: "holding", holder: who.name, holderUid: who.uid, holderGuest: !!who.guest, room: "closed", returnBy: until, note };
+      text = wn + "が鍵を持っている（" + until + "までに返却予定）" + (note ? "：「" + note + "」" : "") + by; break;
     }
     case "hand": {
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。");
@@ -522,11 +553,15 @@ function plan(kind, cur, myName, who) {
       if (k === "guard" && r === "open") throw new Error("鍵が守衛室にあるのに部室が開いている状態は記録できません。");
       if (k !== "guard" && !h) throw new Error("鍵を持っている人の名前を入れてください。");
       const fixM = k === "guard" ? null : members.find(x => x.name === h);
-      next = { key: k, holder: k === "guard" ? "" : h, holderUid: fixM ? fixM.uid : "", holderGuest: false, room: r, returnBy: "", note: "" };
+      next = { key: k, holder: k === "guard" ? "" : h, holderUid: fixM ? fixM.uid : "", holderGuest: false, guests: cur.guests || [], room: r, returnBy: "", note: "" };
       const kl = { guard: "守衛室", borrowed: h + "さんが借用", holding: h + "さんが保持" }[k];
       text = myName + "さんが状態を訂正：鍵=" + kl + "、部室=" + (r === "open" ? "開" : "閉"); break;
     }
   }
+  // 部員以外の名前は、鍵が守衛室に戻るまで選択肢に残す
+  next.guests = next.key === "guard" ? [] : [...new Set([
+    ...(cur.guests || []), ...(who.guest && who.name ? [who.name] : []), ...(next.holderGuest && next.holder ? [next.holder] : []),
+  ])];
   return { next, text };
 }
 
@@ -536,11 +571,12 @@ async function act(kind) {
   if (busy || !me) return;
   const myName = me.name;
   const sel = currentActor();
-  const who = ACTOR_KINDS.includes(kind) ? sel : { name: myName, uid: user.uid, self: true };
+  const who = ACTOR_KINDS.includes(kind) ? sel : { name: myName, uid: user.uid, self: true, guest: false };
+  if (who.guest && !who.name) { setMsg("「誰として記録する？」に部員以外の人の名前を入れてください。", "err"); $("actorGuest").focus(); return; }
   let preview;
   try { preview = plan(kind, { ...state }, myName, who); } catch (e) { setMsg(e.message, "err"); return; }
   const rows = [["操作", preview.text], ["いま", stateLabel(state)], ["記録後", stateLabel(preview.next), "after"]];
-  if (!who.self) rows.splice(1, 0, ["代理記録", who.name + "さんとして、" + myName + "さんが記録します"]);
+  if (!who.self) rows.splice(1, 0, ["代理記録", who.name + "さん" + (who.guest ? "（部員以外）" : "") + "として、" + myName + "さんが記録します"]);
   const ok = await confirmBox("この内容で記録しますか？", rows, ACT_LABEL[kind] + " を記録");
   if (!ok) { setMsg("取りやめました。"); return; }
   busy = true; render(); setMsg("記録中…");
@@ -551,13 +587,13 @@ async function act(kind) {
       const cur = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
       const { next, text } = plan(kind, cur, myName, who);
       const now = Date.now();
-      Object.assign(next, { since: now, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid });
+      Object.assign(next, { since: now, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid, actorGuest: !!who.guest });
       tx.set(stateRef(), next);
-      tx.set(logRef, { ms: now, action: kind, text, prev: cur, next, undone: false, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid });
+      tx.set(logRef, { ms: now, action: kind, text, prev: cur, next, undone: false, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid, actorGuest: !!who.guest });
       return text;
     });
     showPanel(null);
-    if (!who.self) { $("actorSel").value = user.uid; syncActor(); } // 代理記録は1回ごとに自分に戻す
+    if (!who.self) resetActor(); // 代理記録は1回ごとに自分に戻す
     setMsg("記録しました：「" + text + "」", "ok", logRef.id);
   } catch (e) { setMsg(errText(e), "err"); }
   finally { busy = false; render(); }
@@ -567,6 +603,7 @@ async function undo(logId) {
   if (busy || !me) return;
   const entry = logs.find(l => l.id === logId);
   if (!entry || !entry.prev || entry.undone) { setMsg("この記録は取り消せません。", "err"); return; }
+  if (entry.byUid !== user.uid) { setMsg("取り消せるのは、その操作を記録した本人（" + (entry.by || "") + "さん）だけです。", "err"); return; }
   if (!sameState(state, entry.next)) { setMsg("このあとに別の操作が記録されているため取り消せません。必要なら「記録の訂正」を使ってください。", "err"); return; }
   const prev = { ...DEFAULT_STATE, ...entry.prev };
   const ok = await confirmBox("この記録を取り消しますか？", [
@@ -574,6 +611,7 @@ async function undo(logId) {
   ], "取り消す");
   if (!ok) { setMsg("取りやめました。"); return; }
   busy = true; render(); setMsg("取り消し中…");
+  const undoRef = doc(logCol());
   try {
     await runTransaction(db, async tx => {
       const entryRef = doc(db, "clubs", clubId, "log", logId);
@@ -581,11 +619,45 @@ async function undo(logId) {
       const cur = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
       if (!l.exists() || l.data().undone || !sameState(cur, l.data().next))
         throw new Error("直前に別の人が操作したため取り消せませんでした。画面を確認してください。");
-      tx.set(stateRef(), { ...prev, by: me.name, byUid: user.uid, actor: me.name, actorUid: user.uid });
+      const restored = { ...prev, by: me.name, byUid: user.uid, actor: me.name, actorUid: user.uid, actorGuest: false };
+      tx.set(stateRef(), restored);
       tx.update(entryRef, { undone: true, undoneBy: me.name });
-      tx.set(doc(logCol()), { ms: Date.now(), action: "undo", text: me.name + "さんが「" + entry.text + "」を取り消した", by: me.name, byUid: user.uid });
+      // 元に戻す ために、取り消す前（prev）と後（next）の状態、対象の記録を残す
+      tx.set(undoRef, { ms: Date.now(), action: "undo", text: me.name + "さんが「" + entry.text + "」を取り消した", by: me.name, byUid: user.uid,
+        target: logId, prev: cur, next: restored, redone: false });
     });
-    setMsg("取り消しました。", "ok");
+    setMsg("取り消しました。", "ok", null, undoRef.id);
+  } catch (e) { setMsg(errText(e), "err"); }
+  finally { busy = false; render(); }
+}
+
+// 取り消しを取り消す（元に戻す）。取り消した本人だけ、そのあと状態が変わっていないときだけ
+async function redo(undoId) {
+  if (busy || !me) return;
+  const u = logs.find(l => l.id === undoId);
+  if (!u || u.action !== "undo" || !u.target || !u.prev || u.redone) { setMsg("この取り消しは元に戻せません。", "err"); return; }
+  if (u.byUid !== user.uid) { setMsg("元に戻せるのは、取り消した本人（" + (u.by || "") + "さん）だけです。", "err"); return; }
+  if (!sameState(state, u.next)) { setMsg("このあとに別の操作が記録されているため元に戻せません。", "err"); return; }
+  const back = { ...DEFAULT_STATE, ...u.prev };
+  const target = logs.find(l => l.id === u.target);
+  const ok = await confirmBox("取り消しを元に戻しますか？", [
+    ["元に戻す操作", target ? target.text : "（取り消した記録）"], ["いま", stateLabel(state)], ["元に戻した後", stateLabel(back), "after"],
+  ], "元に戻す");
+  if (!ok) { setMsg("取りやめました。"); return; }
+  busy = true; render(); setMsg("元に戻しています…");
+  try {
+    await runTransaction(db, async tx => {
+      const uRef = doc(db, "clubs", clubId, "log", undoId), tRef = doc(db, "clubs", clubId, "log", u.target);
+      const [s, ul, tl] = [await tx.get(stateRef()), await tx.get(uRef), await tx.get(tRef)];
+      const cur = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
+      if (!ul.exists() || ul.data().redone || !sameState(cur, ul.data().next) || !tl.exists())
+        throw new Error("直前に別の人が操作したため元に戻せませんでした。画面を確認してください。");
+      tx.set(stateRef(), { ...back, by: me.name, byUid: user.uid });
+      tx.update(uRef, { redone: true });
+      tx.update(tRef, { undone: false, undoneBy: "" });
+      tx.set(doc(logCol()), { ms: Date.now(), action: "redo", text: me.name + "さんが「" + tl.data().text + "」を元に戻した", by: me.name, byUid: user.uid, target: u.target });
+    });
+    setMsg("元に戻しました。", "ok");
   } catch (e) { setMsg(errText(e), "err"); }
   finally { busy = false; render(); }
 }
