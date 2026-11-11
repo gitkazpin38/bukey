@@ -382,8 +382,9 @@ function renderButtons() {
 
 function renderLog() {
   const ul = $("log"); ul.innerHTML = "";
-  // 取り消せるのは、取り消し・元に戻す 以外で一番新しい記録だけ。押した本人（byUid）だけ
-  const latest = logs.find(l => l.action !== "undo" && l.action !== "redo");
+  // 取り消せるのは、取り消し・元に戻す・取り消し済み 以外で一番新しい記録。押した本人（byUid）だけ。
+  // 続けて取り消すと1つずつさかのぼれる（いまの状態がその記録の直後と一致するときだけ）
+  const latest = logs.find(l => l.action !== "undo" && l.action !== "redo" && !l.undone);
   const undoableId = (latest && latest.prev && !latest.undone && user && latest.byUid === user.uid && sameState(state, latest.next)) ? latest.id : null;
   // 元に戻せるのは、一番新しい記録が自分の「取り消し」で、そのあと状態が変わっていないときだけ
   const top = logs[0];
@@ -457,17 +458,27 @@ function resetActor() { $("actorSel").value = user.uid; $("actorGuest").value = 
 $("actorSel").onchange = () => { syncActor(); if ($("actorSel").value === NEW_GUEST) $("actorGuest").focus(); };
 $("actorGuest").oninput = syncActor;
 
-function showPanel(which) {
+function showPanel(which, hint) {
   $("holdPanel").hidden = which !== "hold";
   $("handPanel").hidden = which !== "hand";
+  $("holdHint").hidden = !(which === "hold" && hint);
   if (which === "hold") {
     if (!$("holdUntil").value) $("holdUntil").value = (club && club.closeTime) || "20:00";
-    $("holdPledge").checked = false; $("holdUntil").focus();
+    $("holdPledge").checked = false;
+    if (hint) $("holdPanel").scrollIntoView({ block: "center", behavior: "smooth" });
+    else $("holdUntil").focus();
   }
   if (which === "hand") {
     $("handGuestOn").checked = false; $("handGuest").value = ""; syncHandGuest();
     fillHandTo(""); $("handTo").focus();
   }
+}
+// 施錠後: 「持っている」の欄を開き、誰として記録するかを鍵を持っている人に合わせる
+function promptHold(n) {
+  const sel = $("actorSel");
+  const v = n.holderGuest ? "guest:" + n.holder : n.holderUid;
+  if (v && [...sel.options].some(o => o.value === v)) { sel.value = v; syncActor(); }
+  showPanel("hold", true);
 }
 function guestTag() { return Object.assign(document.createElement("span"), { className: "guest-tag", textContent: "部員以外" }); }
 const isHolder = (m, s) => s.key !== "guard" && (s.holderUid ? m.uid === s.holderUid : (!s.holderGuest && m.name === s.holder));
@@ -582,7 +593,7 @@ async function act(kind) {
   busy = true; render(); setMsg("記録中…");
   try {
     const logRef = doc(logCol());
-    const text = await runTransaction(db, async tx => {
+    const res = await runTransaction(db, async tx => {
       const s = await tx.get(stateRef());
       const cur = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
       const { next, text } = plan(kind, cur, myName, who);
@@ -590,10 +601,13 @@ async function act(kind) {
       Object.assign(next, { since: now, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid, actorGuest: !!who.guest });
       tx.set(stateRef(), next);
       tx.set(logRef, { ms: now, action: kind, text, prev: cur, next, undone: false, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid, actorGuest: !!who.guest });
-      return text;
+      return { text, next };
     });
+    const text = res.text;
     showPanel(null);
     if (!who.self) resetActor(); // 代理記録は1回ごとに自分に戻す
+    // 部室を閉めたら、鍵をどうするか（返す／持っている）を促す。強制ではない
+    if (kind === "lock" && res.next.key === "borrowed") promptHold(res.next);
     setMsg("記録しました：「" + text + "」", "ok", logRef.id);
   } catch (e) { setMsg(errText(e), "err"); }
   finally { busy = false; render(); }
@@ -652,12 +666,12 @@ async function redo(undoId) {
       const cur = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
       if (!ul.exists() || ul.data().redone || !sameState(cur, ul.data().next) || !tl.exists())
         throw new Error("直前に別の人が操作したため元に戻せませんでした。画面を確認してください。");
+      // 履歴は増やさない: 取り消しの記録を消し、元の記録の取り消し済みを外して、状態を取り消す前に戻す
       tx.set(stateRef(), { ...back, by: me.name, byUid: user.uid });
-      tx.update(uRef, { redone: true });
+      tx.delete(uRef);
       tx.update(tRef, { undone: false, undoneBy: "" });
-      tx.set(doc(logCol()), { ms: Date.now(), action: "redo", text: me.name + "さんが「" + tl.data().text + "」を元に戻した", by: me.name, byUid: user.uid, target: u.target });
     });
-    setMsg("元に戻しました。", "ok");
+    setMsg("元に戻しました。", "ok", u.target); // 元に戻した記録はまた取り消せる
   } catch (e) { setMsg(errText(e), "err"); }
   finally { busy = false; render(); }
 }
