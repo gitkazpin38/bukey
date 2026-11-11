@@ -6,6 +6,7 @@
   --closed:#3d4a5f; --closed-soft:#e3e7ee;
   --warn:#9a5b00; --warn-soft:#fdecc8;
   --bad:#b4232a; --bad-soft:#fbe0e0;
+  --guest:#7a3fb0; --guest-soft:#efe3fa;
   --display:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
   --body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,monospace;
@@ -19,6 +20,7 @@
     --closed:#aab6c9; --closed-soft:#262d39;
     --warn:#f2b84b; --warn-soft:#3a2d12;
     --bad:#ff7a7f; --bad-soft:#3e1d20;
+    --guest:#c99bf2; --guest-soft:#2f2140;
     color-scheme:dark;
   }
 }
@@ -29,6 +31,7 @@
   --closed:#aab6c9; --closed-soft:#262d39;
   --warn:#f2b84b; --warn-soft:#3a2d12;
   --bad:#ff7a7f; --bad-soft:#3e1d20;
+    --guest:#c99bf2; --guest-soft:#2f2140;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -138,3 +141,12 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);b
 .members .ops{display:flex;gap:6px}
 .members .ops button{padding:4px 10px;font-size:12px;display:inline}
 button.danger{border-color:var(--bad);color:var(--bad)}
+
+/* 部員以外への譲渡 */
+.summary b.guest{color:var(--guest)}
+.guest-tag{display:inline-block;font-size:11px;font-weight:700;border:1px solid var(--guest);color:var(--guest);background:var(--guest-soft);border-radius:999px;padding:0 8px;margin-left:6px;vertical-align:middle;line-height:1.6}
+#handGuestBox[hidden]{display:none}
+#handGuest{border-color:var(--guest)}
+.members .tags{display:inline-flex;gap:4px;flex-wrap:wrap}
+.members .me-tag{font-size:11px;font-weight:700;border:1px solid var(--muted);color:var(--muted);border-radius:999px;padding:0 8px;margin-left:6px}
+.members .key-tag{font-size:11px;font-weight:700;border:1px solid var(--open);color:var(--open);border-radius:999px;padding:0 8px;margin-left:6px}

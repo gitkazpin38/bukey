@@ -125,7 +125,9 @@
       <div class="panel" id="handPanel" hidden>
         <strong>鍵を別の人に渡す</strong>
         <span class="sub" style="margin:0">部室の開け閉めの状態は変わりません。</span>
-        <div><label for="handTo">受け取る人の名前</label><input type="text" id="handTo" maxlength="20" list="memberNames" placeholder="例: 佐藤"></div>
+        <div><label for="handTo">受け取る部員</label><select id="handTo"></select></div>
+        <label class="check"><input type="checkbox" id="handGuestOn"> 部員以外の人に渡す（特別な事情があるとき）</label>
+        <div id="handGuestBox" hidden><label for="handGuest">受け取る人の名前（部員以外）</label><input type="text" id="handGuest" maxlength="20" placeholder="例: OBの山田"></div>
         <datalist id="memberNames"></datalist>
         <div class="btns">
           <button class="primary" id="handGo" type="button">渡したと記録する</button>
@@ -139,6 +141,11 @@
     <section class="card" aria-labelledby="logH">
       <h2 id="logH">履歴</h2>
       <ul class="log" id="log"><li class="empty">まだ記録がありません。</li></ul>
+    </section>
+
+    <section class="card" aria-labelledby="memberH">
+      <h2 id="memberH">部員</h2>
+      <ul class="members" id="memberList"></ul>
     </section>
 
     <section class="card">
@@ -193,10 +200,6 @@
               <div><button type="button" id="inviteCopy">コピー</button></div>
               <div><button type="button" id="inviteNew">コードを作り直す</button></div>
             </div>
-          </div>
-          <div>
-            <strong style="font-size:14px">部員</strong>
-            <ul class="members" id="memberList"></ul>
           </div>
         </div>
       </details>
