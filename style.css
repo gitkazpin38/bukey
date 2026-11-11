@@ -169,3 +169,10 @@ button.danger:not(:disabled){background:var(--bad);border-color:var(--bad);color
 .actor-row .actor-note{flex-basis:100%;margin:0}
 .actor-row.proxy{border:1px solid var(--brass);background:var(--brass-soft);border-radius:10px;padding:8px 10px}
 .actor-row.proxy select{border-color:var(--brass);font-weight:700}
+
+/* 部員以外として記録・元に戻す */
+.actor-row #actorGuest{width:auto;flex:1 1 200px;border-color:var(--guest)}
+.actor-row #actorGuest[hidden]{display:none}
+.actor-row.proxy.guest{border-color:var(--guest);background:var(--guest-soft)}
+.actor-row.proxy.guest select{border-color:var(--guest)}
+.undo-btn.redo-btn{border-color:var(--open);color:var(--open)}

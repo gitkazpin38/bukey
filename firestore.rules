@@ -87,9 +87,10 @@ service cloud.firestore {
       match /log/{id} {
         allow read: if isMember(c);
         allow create: if isMember(c) && request.resource.data.byUid == request.auth.uid;
-        // 取り消し済みの印だけ付けられる
+        // 取り消し・元に戻すの印だけ付けられる。付けられるのはその記録を書いた本人だけ
         allow update: if isMember(c)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['undone', 'undoneBy']);
+          && resource.data.byUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['undone', 'undoneBy', 'redone']);
         allow delete: if isAdmin(c);
       }
     }

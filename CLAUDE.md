@@ -79,14 +79,16 @@ note, since(ms), by(表示名), byUid
 「部室を閉めた」と「鍵を渡した」は別ボタン（開けたまま鍵だけ譲渡できるようにするため）。
 
 「誰として記録する？」（操作カード上部のプルダウン、既定は自分）で、借りた・開けた・閉めた・返した・持っている を別の部員として記録できる（代理記録）。
+「＋ 部員以外の人…」を選ぶと名前を入れて部員以外として記録できる（`actorGuest` / 借りた・持っているなら `holderGuest`）。部員以外の名前は state の `guests` に残り、鍵を守衛さんに返す（key=guard）と空になって選択肢から消える。
 state と log に `actor` / `actorUid`（誰として）を持ち、`by` / `byUid` は押した本人のまま（ルールで byUid == auth.uid）。代理のときは文言に「（記録: 本人）」を付け、記録後は自分に戻す。渡した・訂正は常に本人として記録。
 
 ## 誤操作対策（ユーザーの要望で必須）
 
 - **すべての操作は確認画面を出してから書き込む**（`confirmBox()`。`window.confirm` は使わない）。確認画面には「操作 / いま / 記録後」を表示
 - **取り消し**: 記録直後のメッセージと、履歴の最新行に「取り消す」ボタン
-  - 取り消せるのは最新の記録だけ。現在の state がその記録の `next` と一致するとき（key, holder, room, since を比較する `sameState()`）だけ
-  - 取り消すと state を `prev` に戻し、元の記録に `undone: true` を付け、新たに action:"undo" の記録を残す
+  - 取り消せるのは「取り消し・元に戻す」以外で最新の記録だけ。現在の state がその記録の `next` と一致するとき（key, holder, room, since を比較する `sameState()`）だけ。**押した本人（byUid）だけ**（ルールでも log の update は `resource.data.byUid == auth.uid`）
+  - 取り消すと state を `prev` に戻し、元の記録に `undone: true` を付け、新たに action:"undo" の記録（`target`, `prev`, `next`, `redone`）を残す
+  - **元に戻す**: 最新の記録が自分の undo で、state がその `next` と一致するときだけ。state を undo の `prev` に戻し、undo に `redone: true`、元の記録の `undone` を false にし、action:"redo" の記録を残す。元に戻した記録はまた取り消せる
 - 記録と取り消しは `runTransaction` で state と log をまとめて書く（同時押しで食い違わないように）
 
 ## 警告（renderAlerts）
