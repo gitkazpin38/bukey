@@ -91,7 +91,9 @@ service cloud.firestore {
         allow update: if isMember(c)
           && resource.data.byUid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['undone', 'undoneBy', 'redone']);
-        allow delete: if isAdmin(c);
+        // 管理者は履歴を消せる。「元に戻す」では、取り消した本人が自分の取り消しの記録を消す
+        allow delete: if isAdmin(c)
+          || (isMember(c) && resource.data.byUid == request.auth.uid && resource.data.action == 'undo');
       }
     }
   }

@@ -176,3 +176,7 @@ button.danger:not(:disabled){background:var(--bad);border-color:var(--bad);color
 .actor-row.proxy.guest{border-color:var(--guest);background:var(--guest-soft)}
 .actor-row.proxy.guest select{border-color:var(--guest)}
 .undo-btn.redo-btn{border-color:var(--open);color:var(--open)}
+
+/* 施錠後の促し */
+.hold-hint{margin:0;color:var(--warn);font-weight:700}
+.hold-hint[hidden]{display:none}

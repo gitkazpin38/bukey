@@ -86,9 +86,10 @@ state と log に `actor` / `actorUid`（誰として）を持ち、`by` / `byUi
 
 - **すべての操作は確認画面を出してから書き込む**（`confirmBox()`。`window.confirm` は使わない）。確認画面には「操作 / いま / 記録後」を表示
 - **取り消し**: 記録直後のメッセージと、履歴の最新行に「取り消す」ボタン
-  - 取り消せるのは「取り消し・元に戻す」以外で最新の記録だけ。現在の state がその記録の `next` と一致するとき（key, holder, room, since を比較する `sameState()`）だけ。**押した本人（byUid）だけ**（ルールでも log の update は `resource.data.byUid == auth.uid`）
+  - 取り消せるのは「取り消し・元に戻す・取り消し済み」以外で最新の記録（続けて取り消すと1つずつさかのぼれる）。現在の state がその記録の `next` と一致するとき（key, holder, room, since を比較する `sameState()`）だけ。**押した本人（byUid）だけ**（ルールでも log の update は `resource.data.byUid == auth.uid`）
   - 取り消すと state を `prev` に戻し、元の記録に `undone: true` を付け、新たに action:"undo" の記録（`target`, `prev`, `next`, `redone`）を残す
-  - **元に戻す**: 最新の記録が自分の undo で、state がその `next` と一致するときだけ。state を undo の `prev` に戻し、undo に `redone: true`、元の記録の `undone` を false にし、action:"redo" の記録を残す。元に戻した記録はまた取り消せる
+  - **元に戻す**: 最新の記録が自分の undo で、state がその `next` と一致するときだけ。state を undo の `prev` に戻し、**undo の記録を削除**し（ルールで本人の action:"undo" だけ削除可）、元の記録の `undone` を false にする。履歴は増えない。元に戻した記録はまた取り消せる
+- 「部室を閉めた」を記録したら、「鍵を自分で持つ」欄を自動で開いて促す（`promptHold()`、強制ではない）。誰として記録するかは鍵を持っている人に合わせる
 - 記録と取り消しは `runTransaction` で state と log をまとめて書く（同時押しで食い違わないように）
 
 ## 警告（renderAlerts）
