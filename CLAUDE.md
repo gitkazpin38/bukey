@@ -48,6 +48,8 @@ clubs/{clubId}/log/{id}          { ms, action, text, prev, next, undone, undoneB
 key:  "guard"（守衛室・返した） | "borrowed"（借りた） | "holding"（持っている＝保持宣言済み）
 room: "open" | "closed"
 holder: 鍵を持っている人の表示名（guard のときは ""）
+holderUid: holder が部員ならその uid（部員以外・訂正で名前のみのときは ""）
+holderGuest: true なら holder は部員以外（特別な事情での譲渡）。画面では紫の名前と「部員以外」タグ、文言には「（部員以外）」を付ける
 returnBy: holding のときの返却予定 "HH:MM"
 note, since(ms), by(表示名), byUid
 ```
@@ -70,7 +72,7 @@ note, since(ms), by(表示名), byUid
 | lock 部室を閉めた | open | closed（鍵はそのまま。返却・保持はこのあと別に記録） |
 | return 守衛さんに返した | key≠guard, closed | guard |
 | hold 自分で持っている | borrowed, closed | holding, holder=自分。返却時刻必須・最終返却時刻より後は不可・「家に持ち帰らない」チェック必須 |
-| hand 鍵を別の人に渡した | key≠guard | holder だけ変更。**部室が開いたままでも渡せる**（ユーザーの要望） |
+| hand 鍵を別の人に渡した | key≠guard | holder だけ変更。**部室が開いたままでも渡せる**（ユーザーの要望）。受け取る人は参加中の部員から選ぶ。「部員以外の人に渡す」をチェックしたときだけ自由入力で、holderGuest=true |
 | fix 記録の訂正 | いつでも | 指定した状態に直す。履歴に「訂正」で残る |
 | undo 取り消し | 下記 | 直前の操作を戻す |
 
@@ -94,6 +96,7 @@ note, since(ms), by(表示名), byUid
 ## 権限（firestore.rules）
 
 - 部活のデータ（state, log, members）は**その部活の部員だけ**が読み書きできる。ほかの部活の部員は読めない
+- 部員一覧は部員全員に表示する（権限変更・削除のボタンは管理者だけ）
 - `clubs/{clubId}` 本体（名前・鍵番号・最終返却時刻）は参加画面のため、ログイン済みなら ID 指定で1件読める（一覧は不可）。ユーザーはこれで了承済み
 - 参加は正しい招待コードが必要。作成者は管理者として作られ、降格・削除されない
 - 管理者: 部活設定、招待コードの作り直し、部員の権限変更・削除、履歴の削除

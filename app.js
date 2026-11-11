@@ -18,7 +18,7 @@ const params = new URLSearchParams(location.search);
 const clubId = (params.get("club") || "").toLowerCase().trim();
 const codeFromUrl = (params.get("code") || "").trim();
 
-const DEFAULT_STATE = { key: "guard", holder: "", room: "closed", since: 0, returnBy: "", note: "" };
+const DEFAULT_STATE = { key: "guard", holder: "", holderUid: "", holderGuest: false, room: "closed", since: 0, returnBy: "", note: "" };
 const ACT_LABEL = { borrow: "借りた", open: "開けた", lock: "閉めた", hold: "持っている", return: "返した", hand: "渡した", fix: "訂正", undo: "取消" };
 const ACT_CLASS = { borrow: "a-borrow", open: "a-open", lock: "a-lock", hold: "a-hold", return: "a-return", hand: "a-hand", fix: "a-fix", undo: "a-fix" };
 
@@ -47,8 +47,10 @@ const randomCode = () => {
   return Array.from(a, x => chars[x % chars.length]).join("");
 };
 const sameState = (a, b) => a && b && a.key === b.key && (a.holder || "") === (b.holder || "") && a.room === b.room && (a.since || 0) === (b.since || 0);
+// 鍵を持っている人の表示名。部員以外のときは必ず「（部員以外）」を付ける
+const holderText = s => s.holder ? s.holder + "さん" + (s.holderGuest ? "（部員以外）" : "") : "（不明）";
 const stateLabel = s => {
-  const h = s.holder ? s.holder + "さん" : "（不明）";
+  const h = holderText(s);
   const k = s.key === "guard" ? "守衛室" : s.key === "holding" ? h + "が持っている" : h + "が借りている";
   return "鍵: " + k + " ／ 部室: " + (s.room === "open" ? "開いている" : "閉まっている");
 };
@@ -232,6 +234,7 @@ function startBoard() {
     const dl = $("memberNames"); dl.innerHTML = "";
     members.forEach(m => { const o = document.createElement("option"); o.value = m.name; dl.append(o); });
     renderMembers();
+    if (!$("handPanel").hidden) fillHandTo();
   }, () => {}));
   unsubs.push(onSnapshot(stateRef(), s => {
     state = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
@@ -253,7 +256,10 @@ function render() {
   $("L-closed").classList.toggle("on", s.room === "closed");
 
   const sum = $("summary"); sum.innerHTML = "";
-  const who = Object.assign(document.createElement("b"), { textContent: s.holder ? s.holder + "さん" : "誰か" });
+  const who = document.createDocumentFragment();
+  const whoName = Object.assign(document.createElement("b"), { textContent: s.holder ? s.holder + "さん" : "誰か" });
+  who.append(whoName);
+  if (s.holderGuest && s.holder) { whoName.className = "guest"; who.append(guestTag()); }
   if (s.key === "guard") sum.textContent = "部室は閉まっています。鍵は守衛室にあります。";
   else if (s.room === "open") sum.append("部室は開いています。鍵は ", who, " が借りています。");
   else if (s.key === "holding") sum.append("部室は閉まっています。鍵は ", who, " が持っています。");
@@ -270,7 +276,7 @@ function render() {
     if (s.note) sl.append(" ・ " + s.note);
   } else sl.textContent = "まだ記録がありません。鍵は守衛室にある前提で始めます。";
 
-  renderAlerts(); renderButtons(); renderLog();
+  renderAlerts(); renderButtons(); renderLog(); renderMembers();
   if (club && me && me.role === "admin") {
     if (document.activeElement !== $("cfgName")) $("cfgName").value = club.name || "";
     if (document.activeElement !== $("cfgKey")) $("cfgKey").value = club.keyNo || "";
@@ -283,7 +289,7 @@ function renderAlerts() {
   const add = (cls, text) => { const d = document.createElement("div"); d.className = "alert " + cls; d.textContent = text; box.append(d); };
   const s = state, closeTime = (club && club.closeTime) || "20:00";
   const close = minutesOf(closeTime), now = nowMin(), pastClose = close !== null && now >= close;
-  const who = s.holder ? s.holder + "さん" : "鍵を持っている人";
+  const who = s.holder ? holderText(s) : "鍵を持っている人";
   if (s.key !== "guard" && pastClose) add("bad", "最終返却時刻（" + closeTime + "）を過ぎています。" + who + "、施錠して守衛さんに鍵を返してください。家に持ち帰らないこと。");
   else if (s.key !== "guard" && s.since && new Date(s.since).toDateString() !== new Date().toDateString()) add("bad", "前日から鍵が返却されていません。" + who + "、すぐに守衛さんへ返してください。");
   if (s.key === "borrowed" && s.room === "closed" && s.since && Date.now() - s.since > 30 * 60000)
@@ -329,6 +335,7 @@ function renderLog() {
     const a = document.createElement("span"); a.className = "act " + (ACT_CLASS[d.action] || ""); a.textContent = ACT_LABEL[d.action] || d.action;
     const tx = document.createElement("span"); tx.textContent = String(d.text || ""); if (d.undone) tx.className = "undone";
     body.append(a, tx);
+    if (d.action === "hand" && d.next && d.next.holderGuest) body.append(guestTag());
     if (d.undone) { const u = document.createElement("span"); u.className = "undone-note"; u.textContent = " 取り消し済み"; body.append(u); }
     if (d.id === undoableId) {
       const b = document.createElement("button"); b.type = "button"; b.className = "undo-btn"; b.textContent = "取り消す";
@@ -345,8 +352,30 @@ function showPanel(which) {
     if (!$("holdUntil").value) $("holdUntil").value = (club && club.closeTime) || "20:00";
     $("holdPledge").checked = false; $("holdUntil").focus();
   }
-  if (which === "hand") { $("handTo").value = ""; $("handTo").focus(); }
+  if (which === "hand") {
+    $("handGuestOn").checked = false; $("handGuest").value = ""; syncHandGuest();
+    fillHandTo(""); $("handTo").focus();
+  }
 }
+function guestTag() { return Object.assign(document.createElement("span"), { className: "guest-tag", textContent: "部員以外" }); }
+const isHolder = (m, s) => s.key !== "guard" && (s.holderUid ? m.uid === s.holderUid : (!s.holderGuest && m.name === s.holder));
+// 受け取る人は参加している部員から選ぶ（いま持っている人は除く）
+function fillHandTo(keep) {
+  const sel = $("handTo"), cur = keep === undefined ? sel.value : keep;
+  sel.innerHTML = "";
+  const others = members.filter(m => !isHolder(m, state));
+  const first = document.createElement("option"); first.value = "";
+  first.textContent = others.length ? "選んでください" : "ほかの部員がいません（招待してください）";
+  sel.append(first);
+  others.forEach(m => { const o = document.createElement("option"); o.value = m.uid; o.textContent = m.name + (m.uid === user.uid ? "（自分）" : ""); sel.append(o); });
+  sel.value = others.some(m => m.uid === cur) ? cur : "";
+}
+function syncHandGuest() {
+  const on = $("handGuestOn").checked;
+  $("handGuestBox").hidden = !on; $("handTo").disabled = on;
+  if (on) $("handGuest").focus();
+}
+$("handGuestOn").onchange = syncHandGuest;
 $("holdCancel").onclick = () => showPanel(null);
 $("handCancel").onclick = () => showPanel(null);
 $("holdGo").onclick = () => act("hold");
@@ -356,22 +385,21 @@ $("fixGo").onclick = () => act("fix");
 // ---------------- state transitions ----------------
 function plan(kind, cur, myName) {
   let next = { ...cur }, text = "";
-  const holderName = cur.holder || "（不明）";
   const closeTime = (club && club.closeTime) || "20:00";
   switch (kind) {
     case "borrow":
-      if (cur.key !== "guard") throw new Error("鍵はすでに" + holderName + "さんが持っています。画面を確認してください。");
-      next = { key: "borrowed", holder: myName, room: "closed", returnBy: "", note: "" };
+      if (cur.key !== "guard") throw new Error("鍵はすでに" + holderText(cur) + "が持っています。画面を確認してください。");
+      next = { key: "borrowed", holder: myName, holderUid: user.uid, holderGuest: false, room: "closed", returnBy: "", note: "" };
       text = myName + "さんが守衛さんから鍵を借りた"; break;
     case "open":
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。先に「鍵を借りた」を記録してください。");
       if (cur.room === "open") throw new Error("部室はすでに開いています。");
       next = { ...cur, key: "borrowed", room: "open", returnBy: "", note: "" };
-      text = myName + "さんが部室を開けた（鍵: " + holderName + "さん）"; break;
+      text = myName + "さんが部室を開けた（鍵: " + holderText(cur) + "）"; break;
     case "lock":
       if (cur.room !== "open") throw new Error("部室はすでに閉まっています。");
       next = { ...cur, room: "closed" };
-      text = myName + "さんが部室を閉めた（鍵: " + holderName + "さん）"; break;
+      text = myName + "さんが部室を閉めた（鍵: " + holderText(cur) + "）"; break;
     case "return":
       if (cur.key === "guard") throw new Error("鍵はすでに守衛室にあります。");
       if (cur.room === "open") throw new Error("部室が開いたままです。先に施錠してください。");
@@ -386,22 +414,30 @@ function plan(kind, cur, myName) {
       if (close !== null && minutesOf(until) > close) throw new Error("最終返却時刻（" + closeTime + "）より後にはできません。");
       if (!$("holdPledge").checked) throw new Error("確認のチェックを入れてください。");
       const note = san($("holdNote").value, 60);
-      next = { ...cur, key: "holding", holder: myName, room: "closed", returnBy: until, note };
+      next = { ...cur, key: "holding", holder: myName, holderUid: user.uid, holderGuest: false, room: "closed", returnBy: until, note };
       text = myName + "さんが鍵を持っている（" + until + "までに返却予定）" + (note ? "：「" + note + "」" : ""); break;
     }
     case "hand": {
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。");
-      const to = san($("handTo").value);
-      if (!to) throw new Error("受け取る人の名前を入れてください。");
-      if (to === cur.holder) throw new Error("鍵はすでに" + to + "さんが持っています。");
-      next = { ...cur, holder: to };
-      text = holderName + "さん → " + to + "さんに鍵を渡した" + (cur.room === "open" ? "（部室は開いたまま）" : "") + "（記録: " + myName + "さん）"; break;
+      let to, toUid = "", guest = $("handGuestOn").checked;
+      if (guest) {
+        to = san($("handGuest").value);
+        if (!to) throw new Error("受け取る人（部員以外）の名前を入れてください。");
+      } else {
+        const m = members.find(x => x.uid === $("handTo").value);
+        if (!m) throw new Error("受け取る部員を選んでください。");
+        if (isHolder(m, cur)) throw new Error("鍵はすでに" + m.name + "さんが持っています。");
+        to = m.name; toUid = m.uid;
+      }
+      next = { ...cur, holder: to, holderUid: toUid, holderGuest: guest };
+      text = holderText(cur) + " → " + to + "さん" + (guest ? "（部員以外）" : "") + "に鍵を渡した" + (cur.room === "open" ? "（部室は開いたまま）" : "") + "（記録: " + myName + "さん）"; break;
     }
     case "fix": {
       const k = $("fixKey").value, r = $("fixRoom").value, h = san($("fixHolder").value);
       if (k === "guard" && r === "open") throw new Error("鍵が守衛室にあるのに部室が開いている状態は記録できません。");
       if (k !== "guard" && !h) throw new Error("鍵を持っている人の名前を入れてください。");
-      next = { key: k, holder: k === "guard" ? "" : h, room: r, returnBy: "", note: "" };
+      const fixM = k === "guard" ? null : members.find(x => x.name === h);
+      next = { key: k, holder: k === "guard" ? "" : h, holderUid: fixM ? fixM.uid : "", holderGuest: false, room: r, returnBy: "", note: "" };
       const kl = { guard: "守衛室", borrowed: h + "さんが借用", holding: h + "さんが保持" }[k];
       text = myName + "さんが状態を訂正：鍵=" + kl + "、部室=" + (r === "open" ? "開" : "閉"); break;
     }
@@ -501,11 +537,14 @@ $("cfgSave").onclick = async () => {
 
 function renderMembers() {
   const ul = $("memberList"); if (!ul) return; ul.innerHTML = "";
+  $("memberH").textContent = "部員（" + members.length + "人）";
   const isAdmin = me && me.role === "admin";
   members.forEach(m => {
     const li = document.createElement("li");
     const left = document.createElement("span"); left.textContent = m.name;
     if (m.role === "admin") { const r = document.createElement("span"); r.className = "role"; r.textContent = club && m.uid === club.ownerUid ? "作成者" : "管理者"; left.append(r); }
+    if (user && m.uid === user.uid) left.append(Object.assign(document.createElement("span"), { className: "me-tag", textContent: "自分" }));
+    if (ready && isHolder(m, state)) left.append(Object.assign(document.createElement("span"), { className: "key-tag", textContent: state.key === "holding" ? "鍵を持っている" : "鍵を借りている" }));
     li.append(left);
     if (isAdmin && club && m.uid !== club.ownerUid && m.uid !== user.uid) {
       const ops = document.createElement("span"); ops.className = "ops";
