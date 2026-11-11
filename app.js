@@ -4,7 +4,7 @@ import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, collection, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot,
+  getFirestore, doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot,
   query, orderBy, limit, runTransaction, writeBatch, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -216,7 +216,7 @@ $("createClub").onsubmit = async e => {
 // ---------------- join / enter ----------------
 async function enterClub() {
   const cs = await getDoc(clubRef());
-  if (!cs.exists()) { setConn(""); show("missing"); return; }
+  if (!cs.exists()) { setConn(""); show("missing"); removeFromMyList(clubId).catch(() => {}); return; }
   club = cs.data();
   applyClubHeader();
   const ms = await getDoc(doc(db, "clubs", clubId, "members", user.uid));
@@ -251,6 +251,17 @@ function applyClubHeader() {
   document.title = name + " の鍵 | 部室の鍵ボード";
   $("keyNo").textContent = (club && club.keyNo) || "未設定";
   $("keyTag").hidden = false;
+  $("delClubId").textContent = clubId;
+}
+
+// 自分の部活一覧から外す（削除された部活が一覧に残らないように）
+async function removeFromMyList(id) {
+  const ref = doc(db, "users", user.uid);
+  const s = await getDoc(ref);
+  if (!s.exists()) return;
+  const list = s.data().clubs || [];
+  if (!list.some(c => c.id === id)) return;
+  await setDoc(ref, { clubs: list.filter(c => c.id !== id) }, { merge: true });
 }
 
 // ---------------- board ----------------
@@ -567,6 +578,39 @@ $("inviteNew").onclick = async () => {
   try { await setDoc(doc(db, "clubs", clubId, "private", "invite"), { code: randomCode(), updatedAt: Date.now() }); await loadInvite(); setMsg("招待コードを作り直しました。", "ok"); }
   catch (e) { setMsg(errText(e), "err"); }
 };
+// ---------------- delete club（管理者） ----------------
+$("delConfirm").oninput = () => { $("delClub").disabled = $("delConfirm").value.trim().toLowerCase() !== clubId; };
+$("delClub").onclick = async () => {
+  if (!me || me.role !== "admin" || $("delConfirm").value.trim().toLowerCase() !== clubId) return;
+  const name = (club && club.name) || clubId;
+  const ok = await confirmBox("部活を削除しますか？", [
+    ["部活", name + "（" + clubId + "）"],
+    ["消えるもの", "部員 " + members.length + "人・履歴・招待コード・鍵の状態"],
+    ["注意", "元に戻せません。ほかの部員の画面からも消えます。", "after"],
+  ], "削除する");
+  if (!ok) return;
+  const dm = $("delMsg"); dm.className = "msg"; dm.textContent = "削除中…";
+  $("delClub").disabled = true;
+  unsubs.forEach(f => f()); unsubs = []; ready = false;
+  try {
+    const ownerUid = club && club.ownerUid;
+    const [logSnap, memSnap] = await Promise.all([getDocs(logCol()), getDocs(collection(db, "clubs", clubId, "members"))]);
+    // 作成者と自分の部員データは、部活本体と同じ最後のまとめ書き込みで消す（ルールがそれを条件に許可している）
+    const last = [], first = [...logSnap.docs.map(d => d.ref), stateRef(), doc(db, "clubs", clubId, "private", "invite")];
+    memSnap.docs.forEach(d => (d.id === user.uid || d.id === ownerUid ? last : first).push(d.ref));
+    for (let i = 0; i < first.length; i += 400) {
+      const b = writeBatch(db); first.slice(i, i + 400).forEach(r => b.delete(r)); await b.commit();
+    }
+    const b = writeBatch(db); b.delete(clubRef()); last.forEach(r => b.delete(r)); await b.commit();
+    await removeFromMyList(clubId).catch(() => {});
+    location.href = "./";
+  } catch (e) {
+    dm.className = "msg err"; dm.textContent = "削除できませんでした: " + errText(e);
+    $("delClub").disabled = false;
+    startBoard();
+  }
+};
+
 $("cfgSave").onclick = async () => {
   const name = san($("cfgName").value, 30), keyNo = san($("cfgKey").value, 10), closeTime = $("cfgClose").value || "20:00";
   if (!name) return;

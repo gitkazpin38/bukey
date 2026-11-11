@@ -156,3 +156,8 @@ button.danger{border-color:var(--bad);color:var(--bad)}
 #signinHelp{margin-bottom:12px}
 .help-body{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 .help-body button{padding:6px 12px;font-size:13px;display:inline}
+
+/* 部活の削除 */
+.danger-zone{border:1px solid var(--bad);border-radius:10px;padding:12px;background:var(--bad-soft)}
+.danger-zone strong{color:var(--bad)}
+button.danger:not(:disabled){background:var(--bad);border-color:var(--bad);color:#fff}

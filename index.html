@@ -90,7 +90,7 @@
   <!-- 見つからない -->
   <section class="card view" id="v-missing" hidden>
     <h2>部活が見つかりません</h2>
-    <p>URLの部活IDが間違っているかもしれません。<a href="./">部活一覧に戻る</a></p>
+    <p>部活が削除されたか、URLの部活IDが間違っているかもしれません。<a href="./">部活一覧に戻る</a></p>
   </section>
 
   <!-- ボード本体 -->
@@ -206,6 +206,15 @@
               <div><button type="button" id="inviteCopy">コピー</button></div>
               <div><button type="button" id="inviteNew">コードを作り直す</button></div>
             </div>
+          </div>
+          <div class="danger-zone">
+            <strong style="font-size:14px">部活を削除</strong>
+            <p class="sub" style="margin:2px 0 6px">部員・履歴・招待コード・鍵の状態がすべて消え、元に戻せません。ほかの部員の画面からも消えます。</p>
+            <div class="row">
+              <div class="grow"><label for="delConfirm">確認のため部活ID「<span id="delClubId"></span>」を入力</label><input type="text" id="delConfirm" autocomplete="off" spellcheck="false"></div>
+              <div><button type="button" class="danger" id="delClub" disabled>部活を削除する</button></div>
+            </div>
+            <div class="msg" id="delMsg" role="status"></div>
           </div>
         </div>
       </details>
