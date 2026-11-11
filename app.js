@@ -273,7 +273,7 @@ function startBoard() {
   unsubs.push(onSnapshot(clubRef(), s => { if (s.exists()) { club = s.data(); applyClubHeader(); render(); } }));
   unsubs.push(onSnapshot(doc(db, "clubs", clubId, "members", user.uid), s => {
     if (!s.exists()) { setConn("この部活から外されました。"); unsubs.forEach(f => f()); unsubs = []; show("missing"); return; }
-    me = s.data();
+    me = s.data(); fillActor();
     if (document.activeElement !== $("myName")) $("myName").value = me.name || "";
     $("adminCard").hidden = me.role !== "admin";
     if (me.role === "admin") loadInvite();
@@ -283,7 +283,7 @@ function startBoard() {
     members = qs.docs.map(d => d.data()).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
     const dl = $("memberNames"); dl.innerHTML = "";
     members.forEach(m => { const o = document.createElement("option"); o.value = m.name; dl.append(o); });
-    renderMembers();
+    renderMembers(); fillActor();
     if (!$("handPanel").hidden) fillHandTo();
   }, () => {}));
   unsubs.push(onSnapshot(stateRef(), s => {
@@ -318,7 +318,8 @@ function render() {
   const sl = $("subline"); sl.innerHTML = "";
   if (s.since) {
     const t = document.createElement("span"); t.className = "t"; t.textContent = fmtWhen(s.since);
-    sl.append("最終更新 ", t, "（" + ago(s.since) + (s.by ? "・" + s.by + "さん" : "") + "）");
+    const who = s.actor || s.by;
+    sl.append("最終更新 ", t, "（" + ago(s.since) + (who ? "・" + who + "さん" : "") + (s.actor && s.by && s.actor !== s.by ? "、記録: " + s.by + "さん" : "") + "）");
     if (s.key === "holding" && s.returnBy) {
       const r = document.createElement("span"); r.className = "t"; r.textContent = s.returnBy;
       sl.append(" ・ 返却予定 ", r);
@@ -365,7 +366,8 @@ function renderButtons() {
   } else if (s.room === "closed") {
     box.append(btn("部室を開けた", "解錠して中に入る", "go", () => act("open")));
     box.append(btn("守衛さんに返した", "鍵を返却したら押す", "primary", () => act("return")));
-    if (s.key === "borrowed") box.append(btn("自分で持っている", "返却時刻を決めて記録", "", () => showPanel("hold")));
+    const a = currentActor();
+    if (s.key === "borrowed") box.append(btn(a.self ? "自分で持っている" : a.name + "さんが持っている", "返却時刻を決めて記録", "", () => showPanel("hold")));
     box.append(btn("鍵を別の人に渡した", "鍵の持ち主を変える", "", () => showPanel("hand")));
   } else {
     box.append(btn("部室を閉めた", "施錠したら押す。返却・保持はこのあと記録", "primary", () => act("lock")));
@@ -394,6 +396,36 @@ function renderLog() {
     li.append(w, body); ul.append(li);
   });
 }
+
+// ---------------- 誰として記録するか ----------------
+function currentActor() {
+  const uid = $("actorSel").value;
+  const m = members.find(x => x.uid === uid);
+  if (!m || !user || uid === user.uid) return { name: me ? me.name : "", uid: user ? user.uid : "", self: true };
+  return { name: m.name, uid: m.uid, self: false };
+}
+function fillActor() {
+  const sel = $("actorSel"); if (!user) return;
+  const cur = sel.value || user.uid;
+  sel.innerHTML = "";
+  const list = members.length ? members : (me ? [me] : []);
+  // 自分を先頭に
+  [...list].sort((a, b) => (b.uid === user.uid) - (a.uid === user.uid)).forEach(m => {
+    const o = document.createElement("option"); o.value = m.uid;
+    o.textContent = m.uid === user.uid ? m.name + "（自分）" : m.name;
+    sel.append(o);
+  });
+  sel.value = list.some(m => m.uid === cur) ? cur : user.uid;
+  syncActor();
+}
+function syncActor() {
+  const a = currentActor();
+  $("actorRow").classList.toggle("proxy", !a.self);
+  $("actorNote").hidden = a.self;
+  $("actorNote").textContent = a.self ? "" : a.name + "さんとして記録します。記録者（" + (me ? me.name : "") + "さん）も履歴に残ります。記録すると自分に戻ります。";
+  if (ready) renderButtons();
+}
+$("actorSel").onchange = syncActor;
 
 function showPanel(which) {
   $("holdPanel").hidden = which !== "hold";
@@ -433,28 +465,31 @@ $("handGo").onclick = () => act("hand");
 $("fixGo").onclick = () => act("fix");
 
 // ---------------- state transitions ----------------
-function plan(kind, cur, myName) {
+// who = { name, uid, self }：誰として記録するか。myName は押した本人（記録者）
+function plan(kind, cur, myName, who) {
+  who = who || { name: myName, uid: user.uid, self: true };
   let next = { ...cur }, text = "";
   const closeTime = (club && club.closeTime) || "20:00";
+  const by = who.self ? "" : "（記録: " + myName + "さん）";
   switch (kind) {
     case "borrow":
       if (cur.key !== "guard") throw new Error("鍵はすでに" + holderText(cur) + "が持っています。画面を確認してください。");
-      next = { key: "borrowed", holder: myName, holderUid: user.uid, holderGuest: false, room: "closed", returnBy: "", note: "" };
-      text = myName + "さんが守衛さんから鍵を借りた"; break;
+      next = { key: "borrowed", holder: who.name, holderUid: who.uid, holderGuest: false, room: "closed", returnBy: "", note: "" };
+      text = who.name + "さんが守衛さんから鍵を借りた" + by; break;
     case "open":
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。先に「鍵を借りた」を記録してください。");
       if (cur.room === "open") throw new Error("部室はすでに開いています。");
       next = { ...cur, key: "borrowed", room: "open", returnBy: "", note: "" };
-      text = myName + "さんが部室を開けた（鍵: " + holderText(cur) + "）"; break;
+      text = who.name + "さんが部室を開けた（鍵: " + holderText(cur) + "）" + by; break;
     case "lock":
       if (cur.room !== "open") throw new Error("部室はすでに閉まっています。");
       next = { ...cur, room: "closed" };
-      text = myName + "さんが部室を閉めた（鍵: " + holderText(cur) + "）"; break;
+      text = who.name + "さんが部室を閉めた（鍵: " + holderText(cur) + "）" + by; break;
     case "return":
       if (cur.key === "guard") throw new Error("鍵はすでに守衛室にあります。");
       if (cur.room === "open") throw new Error("部室が開いたままです。先に施錠してください。");
       next = { ...DEFAULT_STATE };
-      text = myName + "さんが守衛さんに鍵を返した"; break;
+      text = who.name + "さんが守衛さんに鍵を返した" + by; break;
     case "hold": {
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。");
       if (cur.room === "open") throw new Error("部室が開いたままです。先に施錠してください。");
@@ -464,8 +499,8 @@ function plan(kind, cur, myName) {
       if (close !== null && minutesOf(until) > close) throw new Error("最終返却時刻（" + closeTime + "）より後にはできません。");
       if (!$("holdPledge").checked) throw new Error("確認のチェックを入れてください。");
       const note = san($("holdNote").value, 60);
-      next = { ...cur, key: "holding", holder: myName, holderUid: user.uid, holderGuest: false, room: "closed", returnBy: until, note };
-      text = myName + "さんが鍵を持っている（" + until + "までに返却予定）" + (note ? "：「" + note + "」" : ""); break;
+      next = { ...cur, key: "holding", holder: who.name, holderUid: who.uid, holderGuest: false, room: "closed", returnBy: until, note };
+      text = who.name + "さんが鍵を持っている（" + until + "までに返却予定）" + (note ? "：「" + note + "」" : "") + by; break;
     }
     case "hand": {
       if (cur.key === "guard") throw new Error("鍵は守衛室にあります。");
@@ -495,14 +530,18 @@ function plan(kind, cur, myName) {
   return { next, text };
 }
 
+// 「誰として記録する」を使うのは、借りた・開けた・閉めた・返した・持っている。渡した・訂正は押した本人として記録
+const ACTOR_KINDS = ["borrow", "open", "lock", "return", "hold"];
 async function act(kind) {
   if (busy || !me) return;
   const myName = me.name;
+  const sel = currentActor();
+  const who = ACTOR_KINDS.includes(kind) ? sel : { name: myName, uid: user.uid, self: true };
   let preview;
-  try { preview = plan(kind, { ...state }, myName); } catch (e) { setMsg(e.message, "err"); return; }
-  const ok = await confirmBox("この内容で記録しますか？", [
-    ["操作", preview.text], ["いま", stateLabel(state)], ["記録後", stateLabel(preview.next), "after"],
-  ], ACT_LABEL[kind] + " を記録");
+  try { preview = plan(kind, { ...state }, myName, who); } catch (e) { setMsg(e.message, "err"); return; }
+  const rows = [["操作", preview.text], ["いま", stateLabel(state)], ["記録後", stateLabel(preview.next), "after"]];
+  if (!who.self) rows.splice(1, 0, ["代理記録", who.name + "さんとして、" + myName + "さんが記録します"]);
+  const ok = await confirmBox("この内容で記録しますか？", rows, ACT_LABEL[kind] + " を記録");
   if (!ok) { setMsg("取りやめました。"); return; }
   busy = true; render(); setMsg("記録中…");
   try {
@@ -510,14 +549,15 @@ async function act(kind) {
     const text = await runTransaction(db, async tx => {
       const s = await tx.get(stateRef());
       const cur = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
-      const { next, text } = plan(kind, cur, myName);
+      const { next, text } = plan(kind, cur, myName, who);
       const now = Date.now();
-      Object.assign(next, { since: now, by: myName, byUid: user.uid });
+      Object.assign(next, { since: now, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid });
       tx.set(stateRef(), next);
-      tx.set(logRef, { ms: now, action: kind, text, prev: cur, next, undone: false, by: myName, byUid: user.uid });
+      tx.set(logRef, { ms: now, action: kind, text, prev: cur, next, undone: false, by: myName, byUid: user.uid, actor: who.name, actorUid: who.uid });
       return text;
     });
     showPanel(null);
+    if (!who.self) { $("actorSel").value = user.uid; syncActor(); } // 代理記録は1回ごとに自分に戻す
     setMsg("記録しました：「" + text + "」", "ok", logRef.id);
   } catch (e) { setMsg(errText(e), "err"); }
   finally { busy = false; render(); }
@@ -541,7 +581,7 @@ async function undo(logId) {
       const cur = s.exists() ? { ...DEFAULT_STATE, ...s.data() } : { ...DEFAULT_STATE };
       if (!l.exists() || l.data().undone || !sameState(cur, l.data().next))
         throw new Error("直前に別の人が操作したため取り消せませんでした。画面を確認してください。");
-      tx.set(stateRef(), { ...prev, by: me.name, byUid: user.uid });
+      tx.set(stateRef(), { ...prev, by: me.name, byUid: user.uid, actor: me.name, actorUid: user.uid });
       tx.update(entryRef, { undone: true, undoneBy: me.name });
       tx.set(doc(logCol()), { ms: Date.now(), action: "undo", text: me.name + "さんが「" + entry.text + "」を取り消した", by: me.name, byUid: user.uid });
     });
