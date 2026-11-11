@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// 部室の鍵ボード — Firestore セキュリティルール
+// clubs/{clubId}              部活の設定（名前・鍵番号・最終返却時刻・作成者）
+// clubs/{clubId}/private/invite  招待コード（管理者だけが読める）
+// clubs/{clubId}/members/{uid}   部員（role: "admin" | "member"）
+// clubs/{clubId}/state/main      鍵と部室のいまの状態
+// clubs/{clubId}/log/{id}        履歴
+// users/{uid}                    自分が入っている部活の一覧
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function clubPath(c) { return /databases/$(database)/documents/clubs/$(c); }
+    function memberPath(c) { return /databases/$(database)/documents/clubs/$(c)/members/$(request.auth.uid); }
+    function isMember(c) { return signedIn() && exists(memberPath(c)); }
+    function isAdmin(c) { return isMember(c) && get(memberPath(c)).data.role == 'admin'; }
+    function ownerOf(c) { return get(clubPath(c)).data.ownerUid; }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /clubs/{c} {
+      // 参加画面で部活名を出すため、ログイン済みなら1件ずつの読み取りは許可（一覧は不可）
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && c.matches('^[a-z0-9-]{3,32}$')
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isAdmin(c)
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+
+      match /private/{d} {
+        allow read, write: if isAdmin(c);
+      }
+
+      match /members/{uid} {
+        allow get: if signedIn() && uid == request.auth.uid;
+        allow read: if isMember(c);
+
+        // 作成者は管理者として、ほかの人は正しい招待コードで一般部員として参加
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 20
+          && (
+            (request.resource.data.role == 'admin'
+              && getAfter(clubPath(c)).data.ownerUid == request.auth.uid)
+            ||
+            (request.resource.data.role == 'member'
+              && request.resource.data.joinCode == get(/databases/$(database)/documents/clubs/$(c)/private/invite).data.code)
+          );
+
+        // 管理者は権限を変えられる（作成者は降格不可）。本人は名前だけ変えられる
+        allow update: if (
+            isAdmin(c)
+            && request.resource.data.uid == resource.data.uid
+            && (uid != ownerOf(c) || request.resource.data.role == 'admin')
+          ) || (
+            signedIn() && uid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+            && request.resource.data.name.size() > 0
+            && request.resource.data.name.size() <= 20
+          );
+
+        // 管理者による削除、または本人の脱退（作成者は不可）
+        allow delete: if uid != ownerOf(c)
+          && (isAdmin(c) || (signedIn() && uid == request.auth.uid));
+      }
+
+      match /state/{d} {
+        allow read: if isMember(c);
+        allow write: if isMember(c)
+          && request.resource.data.key in ['guard', 'borrowed', 'holding']
+          && request.resource.data.room in ['open', 'closed']
+          && request.resource.data.byUid == request.auth.uid;
+      }
+
+      match /log/{id} {
+        allow read: if isMember(c);
+        allow create: if isMember(c) && request.resource.data.byUid == request.auth.uid;
+        // 取り消し済みの印だけ付けられる
+        allow update: if isMember(c)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['undone', 'undoneBy']);
+        allow delete: if isAdmin(c);
+      }
+    }
+  }
+}

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>部室の鍵ボード</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="title">部室の鍵ボード</h1>
+      <div class="conn" id="conn">読み込み中…</div>
+    </div>
+    <div class="head-right">
+      <span class="tag" id="keyTag" hidden title="守衛さんに伝える鍵番号">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="5" cy="8" r="3"/><path d="M8 8h7M12.5 8v2.5M14.5 8v2"/></svg>
+        <span>鍵番号 <span id="keyNo">—</span></span>
+      </span>
+      <div class="who" id="who" hidden>
+        <span id="whoName"></span>
+        <a href="./" id="homeLink">部活一覧</a>
+        <button type="button" class="link" id="signOutBtn">ログアウト</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ログイン前 -->
+  <section class="card view" id="v-signin" hidden>
+    <h2>ログイン</h2>
+    <p>部室の鍵を「誰が借りたか」「部室は開いているか」を部員みんなで共有するボードです。Googleアカウントでログインしてください。</p>
+    <div class="btns"><button type="button" class="primary" id="signInBtn">Googleでログイン</button></div>
+  </section>
+
+  <!-- 部活一覧・作成・参加 -->
+  <section class="view" id="v-home" hidden>
+    <div class="card">
+      <h2>あなたの部活</h2>
+      <ul class="clubs" id="myClubs"><li class="empty">まだ参加している部活はありません。</li></ul>
+    </div>
+    <div class="card">
+      <h2>招待コードで参加する</h2>
+      <form id="joinJump" class="row">
+        <div class="grow"><label for="jjClub">部活ID</label><input type="text" id="jjClub" placeholder="例: light-music" autocomplete="off"></div>
+        <div class="grow"><label for="jjCode">招待コード</label><input type="text" id="jjCode" autocomplete="off"></div>
+        <div><button type="submit" class="primary">次へ</button></div>
+      </form>
+      <p class="sub">管理者から届いた招待リンクを開けば、ここは自動で埋まります。</p>
+    </div>
+    <div class="card">
+      <h2>新しく部活を登録する</h2>
+      <form id="createClub" class="stack">
+        <div class="row">
+          <div class="grow"><label for="ccId">部活ID（URLになります・英小文字/数字/ハイフン 3〜32字）</label><input type="text" id="ccId" placeholder="light-music" pattern="[a-z0-9\-]{3,32}" required autocomplete="off"></div>
+          <div class="grow"><label for="ccName">部活の名前</label><input type="text" id="ccName" placeholder="軽音楽部" maxlength="30" required></div>
+        </div>
+        <div class="row">
+          <div style="flex:0 0 140px"><label for="ccKey">鍵番号</label><input type="text" id="ccKey" maxlength="10" placeholder="214"></div>
+          <div style="flex:0 0 140px"><label for="ccClose">最終返却時刻</label><input type="time" id="ccClose" value="20:00" required></div>
+          <div class="grow"><label for="ccMe">あなたの表示名</label><input type="text" id="ccMe" maxlength="20" required></div>
+        </div>
+        <div><button type="submit" class="primary">登録して管理者になる</button></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- 部活への参加 -->
+  <section class="card view" id="v-join" hidden>
+    <h2>部活に参加する</h2>
+    <p><strong id="joinClubName"></strong> に参加します。管理者から聞いた招待コードを入れてください。</p>
+    <form id="joinForm" class="stack">
+      <div class="row">
+        <div class="grow"><label for="joinCode">招待コード</label><input type="text" id="joinCode" required autocomplete="off"></div>
+        <div class="grow"><label for="joinName">ボードに表示する名前</label><input type="text" id="joinName" maxlength="20" required></div>
+      </div>
+      <div><button type="submit" class="primary">参加する</button></div>
+    </form>
+  </section>
+
+  <!-- 見つからない -->
+  <section class="card view" id="v-missing" hidden>
+    <h2>部活が見つかりません</h2>
+    <p>URLの部活IDが間違っているかもしれません。<a href="./">部活一覧に戻る</a></p>
+  </section>
+
+  <!-- ボード本体 -->
+  <div class="view" id="v-board" hidden>
+    <section class="card" aria-labelledby="nowH">
+      <h2 id="nowH">いまの状態</h2>
+      <div class="lamp-group-label"><span>鍵</span><span>部室</span></div>
+      <div class="lamps">
+        <div class="lamp k-borrowed" id="L-borrowed"><span class="dot"></span>借りた</div>
+        <div class="lamp k-holding" id="L-holding"><span class="dot"></span>持っている</div>
+        <div class="lamp k-guard" id="L-guard"><span class="dot"></span>返した</div>
+        <div class="lamp r-open" id="L-open"><span class="dot"></span>開いている</div>
+        <div class="lamp r-closed" id="L-closed"><span class="dot"></span>閉まっている</div>
+      </div>
+      <div class="summary" id="summary">—</div>
+      <div class="sub" id="subline"></div>
+    </section>
+
+    <div class="alerts" id="alerts"></div>
+
+    <section class="card actions" aria-labelledby="actH">
+      <h2 id="actH">操作</h2>
+      <div class="btns" id="btns"></div>
+
+      <div class="panel" id="holdPanel" hidden>
+        <strong>鍵を自分で持つ</strong>
+        <div class="row">
+          <div style="flex:0 0 140px"><label for="holdUntil">何時までに返す？</label><input type="time" id="holdUntil"></div>
+          <div class="grow"><label for="holdNote">メモ（任意）</label><input type="text" id="holdNote" maxlength="60" placeholder="例: 夕食後に戻って作業"></div>
+        </div>
+        <label class="check"><input type="checkbox" id="holdPledge"> 部室は施錠済みで、鍵は家に持ち帰らず今日中に守衛さんへ返します。</label>
+        <div class="btns">
+          <button class="primary" id="holdGo" type="button">持っていると記録する</button>
+          <button type="button" id="holdCancel">やめる</button>
+        </div>
+      </div>
+
+      <div class="panel" id="handPanel" hidden>
+        <strong>鍵を別の人に渡す</strong>
+        <span class="sub" style="margin:0">部室の開け閉めの状態は変わりません。</span>
+        <div><label for="handTo">受け取る人の名前</label><input type="text" id="handTo" maxlength="20" list="memberNames" placeholder="例: 佐藤"></div>
+        <datalist id="memberNames"></datalist>
+        <div class="btns">
+          <button class="primary" id="handGo" type="button">渡したと記録する</button>
+          <button type="button" id="handCancel">やめる</button>
+        </div>
+      </div>
+
+      <div class="msg" id="msg" role="status"></div>
+    </section>
+
+    <section class="card" aria-labelledby="logH">
+      <h2 id="logH">履歴</h2>
+      <ul class="log" id="log"><li class="empty">まだ記録がありません。</li></ul>
+    </section>
+
+    <section class="card">
+      <details>
+        <summary>ルールと記録の訂正</summary>
+        <div class="inner">
+          <ol class="rules">
+            <li>守衛さんから鍵を借りたら「鍵を借りた」を押す。</li>
+            <li>部室を開けたら「開けた」、施錠したら「閉めた」。部室を開けたまま鍵を別の人に任せるときは「鍵を別の人に渡した」。</li>
+            <li>施錠したら、守衛さんに返して「返した」か、自分で持つなら「持っている」を記録する。</li>
+            <li>鍵は絶対に家に持ち帰らない。最終返却時刻を過ぎて鍵が戻っていないと赤く警告が出ます。</li>
+          </ol>
+          <div>
+            <strong style="font-size:14px">記録の訂正</strong>
+            <p class="sub" style="margin:2px 0 8px">実際の状態とボードがずれたときだけ使ってください。履歴に「訂正」として残ります。</p>
+            <div class="row">
+              <div style="flex:0 0 150px"><label for="fixKey">鍵</label>
+                <select id="fixKey"><option value="guard">守衛室にある</option><option value="borrowed">借りている</option><option value="holding">持っている</option></select></div>
+              <div style="flex:0 0 130px"><label for="fixRoom">部室</label>
+                <select id="fixRoom"><option value="closed">閉まっている</option><option value="open">開いている</option></select></div>
+              <div class="grow"><label for="fixHolder">鍵を持っている人</label><input type="text" id="fixHolder" maxlength="20" list="memberNames"></div>
+              <div><button type="button" id="fixGo">訂正する</button></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="grow"><label for="myName">ボードに表示する自分の名前</label><input type="text" id="myName" maxlength="20"></div>
+            <div><button type="button" id="myNameSave">名前を変える</button></div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- 管理者だけ -->
+    <section class="card" id="adminCard" hidden>
+      <details>
+        <summary>管理者メニュー</summary>
+        <div class="inner">
+          <div>
+            <strong style="font-size:14px">部活の設定</strong>
+            <div class="row" style="margin-top:6px">
+              <div class="grow"><label for="cfgName">部活の名前</label><input type="text" id="cfgName" maxlength="30"></div>
+              <div style="flex:0 0 120px"><label for="cfgKey">鍵番号</label><input type="text" id="cfgKey" maxlength="10"></div>
+              <div style="flex:0 0 130px"><label for="cfgClose">最終返却時刻</label><input type="time" id="cfgClose"></div>
+              <div><button type="button" id="cfgSave">保存</button></div>
+            </div>
+          </div>
+          <div>
+            <strong style="font-size:14px">招待</strong>
+            <p class="sub" style="margin:2px 0 6px">このリンクを部員に送ってください。コードを作り直すと、古いリンクでは参加できなくなります（参加済みの人はそのまま）。</p>
+            <div class="row">
+              <div class="grow"><label for="inviteLink">招待リンク</label><input type="text" id="inviteLink" readonly></div>
+              <div><button type="button" id="inviteCopy">コピー</button></div>
+              <div><button type="button" id="inviteNew">コードを作り直す</button></div>
+            </div>
+          </div>
+          <div>
+            <strong style="font-size:14px">部員</strong>
+            <ul class="members" id="memberList"></ul>
+          </div>
+        </div>
+      </details>
+    </section>
+  </div>
+</div>
+
+<div class="overlay" id="dlg" hidden>
+  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
+    <h3 id="dlgTitle">確認</h3>
+    <div class="dlg-body" id="dlgBody"></div>
+    <div class="btns">
+      <button type="button" id="dlgNo">やめる</button>
+      <button type="button" class="primary" id="dlgOk">記録する</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
