@@ -1,7 +1,7 @@
 // 部室の鍵ボード — GitHub Pages + Firebase 版
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, collection, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot,
@@ -103,13 +103,52 @@ function confirmBox(title, lines, okLabel) {
 }
 
 // ---------------- auth ----------------
+// ポップアップが使えないときはリダイレクトでログインする。ただし GitHub Pages とログイン用ドメイン
+// （firebaseapp.com）が別なので、ブラウザによっては戻ってきてもログインできていない。
+// そのときは黙って失敗しないよう、Safari / Chrome で開き直す案内を出す。
+const REDIRECT_KEY = "bukey-signin-redirect-at";
+const ss = {
+  get: () => { try { return sessionStorage.getItem(REDIRECT_KEY); } catch { return null; } },
+  set: v => { try { sessionStorage.setItem(REDIRECT_KEY, v); } catch {} },
+  del: () => { try { sessionStorage.removeItem(REDIRECT_KEY); } catch {} },
+};
+// LINE / Instagram / Facebook / X などのアプリ内ブラウザ
+const IN_APP = /\bLine\/|FBAN|FBAV|Instagram|Twitter|MicroMessenger|KAKAOTALK|; wv\)/i.test(navigator.userAgent);
+
+function showSigninHelp(kind) {
+  const box = $("signinHelp");
+  if (!kind) { box.hidden = true; return; }
+  box.className = "alert " + (kind === "failed" ? "bad" : "warn");
+  $("signinHelpText").textContent = kind === "failed"
+    ? "ログインできませんでした。このブラウザではログインが完了しないことがあります。このページのURLをコピーして、Safari か Chrome で開き直してください。"
+    : "LINE などのアプリの中で開いているため、ログインできないことがあります。うまくいかないときは、URLをコピーして Safari か Chrome で開いてください。";
+  box.hidden = false;
+}
+$("copyUrlBtn").onclick = async () => {
+  try { await navigator.clipboard.writeText(location.href); $("copyUrlBtn").textContent = "コピーしました"; }
+  catch { window.prompt("このURLをコピーしてください", location.href); }
+};
+if (IN_APP) showSigninHelp("inapp");
+
+// リダイレクトから戻ってきたときの結果。ログインできていなければ案内を出す
+getRedirectResult(auth).catch(e => e).then(r => {
+  const tried = ss.get(); ss.del();
+  if (!tried || auth.currentUser) return;
+  showSigninHelp("failed");
+  if (r && r.code) setConn("ログインできませんでした: " + errText(r));
+});
+
 $("signInBtn").onclick = async () => {
   const provider = new GoogleAuthProvider();
+  showSigninHelp(IN_APP ? "inapp" : null);
   try { await signInWithPopup(auth, provider); }
   catch (e) {
     if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") {
-      await signInWithRedirect(auth, provider);
+      ss.set(String(Date.now()));
+      try { await signInWithRedirect(auth, provider); }
+      catch (e2) { ss.del(); showSigninHelp("failed"); setConn("ログインできませんでした: " + errText(e2)); }
     } else if (e.code !== "auth/popup-closed-by-user" && e.code !== "auth/cancelled-popup-request") {
+      showSigninHelp("failed");
       setConn("ログインできませんでした: " + errText(e));
     }
   }

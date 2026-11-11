@@ -150,3 +150,9 @@ button.danger{border-color:var(--bad);color:var(--bad)}
 .members .tags{display:inline-flex;gap:4px;flex-wrap:wrap}
 .members .me-tag{font-size:11px;font-weight:700;border:1px solid var(--muted);color:var(--muted);border-radius:999px;padding:0 8px;margin-left:6px}
 .members .key-tag{font-size:11px;font-weight:700;border:1px solid var(--open);color:var(--open);border-radius:999px;padding:0 8px;margin-left:6px}
+
+/* ログインできないときの案内 */
+.alert[hidden]{display:none}
+#signinHelp{margin-bottom:12px}
+.help-body{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.help-body button{padding:6px 12px;font-size:13px;display:inline}

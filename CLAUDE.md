@@ -110,6 +110,7 @@ note, since(ms), by(表示名), byUid
 - 画面（HTML/CSS/JS）は main に入れれば GitHub Pages が自動で更新される
 - **`firestore.rules` は GitHub に入れても Firebase には反映されない。** Firebase コンソールに貼るか `firebase deploy --only firestore:rules` が必要。ルールを変えたら、そのことを必ずユーザーに伝える
 - Firebase Auth の承認済みドメインに `<user>.github.io` が必要
+- ログインはポップアップが基本。使えないときのリダイレクトは、github.io と firebaseapp.com が別ドメインのためブラウザによっては戻ってきてもログインできない。そのときとアプリ内ブラウザ（LINE など）では、Safari / Chrome で開き直す案内を出している（`showSigninHelp()`）
 - サービスアカウントの鍵などの秘密情報はリポジトリに入れない
 
 ## 作業の進め方
